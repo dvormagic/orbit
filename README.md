@@ -2,7 +2,7 @@
 
 Orbit is a minimalist and elegant cross-platform desktop task tracker, designed for developers who need to manage their time and focus on tasks and Pull Requests efficiently.
 
-![Orbit Icon](public/icon.png)
+<img src="public/icon.png" width="128" alt="Orbit Icon" />
 
 ## Features
 
