@@ -45,5 +45,10 @@
       "AppImage"
     ],
     "artifactName": "${productName}-Linux-${version}.${ext}"
+  },
+  "publish": {
+    "provider": "github",
+    "owner": "dvormagic",
+    "repo": "orbit"
   }
 }
