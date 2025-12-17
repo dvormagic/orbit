@@ -1,6 +1,6 @@
 # Orbit 🪐
 
-Orbit is a minimalist and elegant desktop task tracker, designed for developers who need to manage their time and focus on tasks and Pull Requests efficiently.
+Orbit is a minimalist and elegant cross-platform desktop task tracker, designed for developers who need to manage their time and focus on tasks and Pull Requests efficiently.
 
 ![Orbit Icon](public/icon.png)
 
@@ -25,51 +25,31 @@ Orbit is a minimalist and elegant desktop task tracker, designed for developers 
 # Install dependencies
 npm install
 
+# Initialize database
+npx prisma db push
+
 # Start in development mode
 npm run dev
 ```
 
-## Release & Versioning
-
-We use [Semantic Versioning](https://semver.org/) managed by `npm version`. This workflow automatically updates `package.json`, commits the change, and creates a Git Tag.
-
-### Workflow
-
-1. **Commit your changes**: Ensure your working directory is clean.
-2. **Bump version**: Run one of the following commands:
-
-   ```bash
-   # For bug fixes (0.0.1 -> 0.0.2)
-   npm version patch
-
-   # For new features (0.0.1 -> 0.1.0)
-   npm version minor
-
-   # For breaking changes (0.0.1 -> 1.0.0)
-   npm version major
-   ```
-
-3. **Push changes and tags**:
-   ```bash
-   git push origin main --tags
-   ```
-
 ## Building for Production
 
-To generate installable executables for your OS:
+Orbit is a multi-platform application. You can build the source for any of the following systems:
 
-### 🍎 Mac (Apple Silicon / M1, M2, M3)
-
-This command generates a `.dmg` file in the `release/` folder.
+### 🍎 Mac (Apple Silicon / Intel)
 
 ```bash
+# For Apple Silicon (M1/M2/M3)
 npm run build:mac
+
+# For Intel
+npm run build -- --mac --x64
 ```
 
 ### 🪟 Windows
 
 ```bash
-# Requires running on Windows or using Wine
+# This will generate an .exe installer
 npm run build -- --win
 ```
 
@@ -89,9 +69,9 @@ npm run build -- --linux
 
 ## Database Note
 
-In production, the database is stored in the system's user data folder:
-- Mac: `~/Library/Application Support/Orbit/database.db`
-- Windows: `%APPDATA%/Orbit/database.db`
+In production, the database is stored in the system's user data folder to ensure persistence:
+- Mac: `~/Library/Application Support/orbit/database.db`
+- Windows: `%APPDATA%/orbit/database.db`
 
 ## License
 
