@@ -1,0 +1,41 @@
+@import "tailwindcss";
+
+:root {
+  font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+
+  color-scheme: dark;
+  color: #f1f5f9;
+  background-color: transparent;
+
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  margin: 0;
+  display: flex;
+  place-items: center;
+  min-width: 320px;
+  min-height: 100vh;
+  background-color: transparent;
+  overflow: hidden;
+}
+
+
+#app {
+  width: 100%;
+  height: 100vh;
+  box-sizing: border-box;
+}
+
+.draggable {
+  -webkit-app-region: drag;
+}
+
+.no-draggable {
+  -webkit-app-region: no-drag;
+}
