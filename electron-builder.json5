@@ -13,6 +13,7 @@
   ],
   "extraResources": [
     "prisma/schema.prisma",
+    "prisma/dev.db",
     "node_modules/.prisma/**/*",
     "node_modules/@prisma/client/**/*"
   ],

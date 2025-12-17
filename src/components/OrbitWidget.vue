@@ -19,8 +19,13 @@ const activeTab = ref<'active' | 'completed'>('active')
 const now = ref(Date.now())
 let timerInterval: ReturnType<typeof setInterval> | null = null
 
-onMounted(() => {
-  taskStore.fetchTasks()
+onMounted(async () => {
+  try {
+    await taskStore.fetchTasks()
+  } catch (error) {
+    console.error('Failed to fetch tasks:', error)
+  }
+  
   timerInterval = setInterval(() => {
     now.value = Date.now()
   }, 1000)
