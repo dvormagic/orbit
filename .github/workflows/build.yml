@@ -10,8 +10,11 @@ on:
 jobs:
   release:
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
 
     strategy:
+      fail-fast: false
       matrix:
         os: [macos-latest, windows-latest, ubuntu-latest]
 
