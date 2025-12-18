@@ -283,9 +283,9 @@ const getStatusColor = (status: string) => {
                 <button @click.stop="task.jiraUrl ? openUrl(task.jiraUrl) : startEditUrl(task.id, 'jira', task.jiraUrl)" 
                         :class="task.jiraUrl ? 'text-blue-400 bg-blue-400/10' : 'text-slate-500 bg-slate-700/50'"
                         class="p-1.5 rounded text-[10px] font-bold flex items-center gap-1 hover:opacity-80 transition-all"
-                        :title="task.jiraUrl ? 'Abrir Jira' : 'Añadir URL Jira'">
+                        :title="task.jiraUrl ? 'Abrir Tarea' : 'Añadir URL Tarea'">
                   <Link2 class="w-3 h-3" />
-                  <span>JIRA</span>
+                  <span>TASK</span>
                 </button>
                 <button @click.stop="task.prUrl ? openUrl(task.prUrl) : startEditUrl(task.id, 'pr', task.prUrl)" 
                         :class="task.prUrl ? 'text-purple-400 bg-purple-400/10' : 'text-slate-500 bg-slate-700/50'"
@@ -348,8 +348,10 @@ const getStatusColor = (status: string) => {
     <!-- URL Edit Modal -->
     <div v-if="editingUrlTaskId" class="absolute inset-0 bg-slate-900/90 flex items-center justify-center p-4 z-50">
       <div class="bg-slate-800 border border-slate-700 rounded-lg p-4 w-full max-w-xs space-y-3">
-        <h3 class="text-sm font-bold text-slate-200">{{ editingUrlType === 'jira' ? 'URL de Jira' : 'URL del PR' }}</h3>
-        <input v-model="editingUrlValue" :placeholder="editingUrlType === 'jira' ? 'https://jira.example.com/...' : 'https://bitbucket.org/...'"
+        <h3 class="text-xs font-bold text-slate-300">
+          Añadir URL {{ editingUrlType === 'jira' ? 'Tarea' : 'PR' }}
+        </h3>
+        <input v-model="editingUrlValue" :placeholder="editingUrlType === 'jira' ? 'https://task-management.com/...' : 'https://github.com/...'"
                class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-xs focus:border-cyan-500 focus:outline-none" />
         <div class="flex gap-2">
           <button @click="saveUrl" class="flex-1 bg-cyan-500 text-slate-900 py-2 rounded-lg text-xs font-bold hover:bg-cyan-400 transition-colors">Guardar</button>
