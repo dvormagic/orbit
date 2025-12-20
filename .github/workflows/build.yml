@@ -36,7 +36,10 @@ jobs:
       - name: Read version
         id: meta
         shell: bash
-        run: echo "version=$(node -p \"require('./package.json').version\")" >> "$GITHUB_OUTPUT"
+        run: |
+          # Workflow only runs on tags like vX.Y.Z
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Generate Prisma Client
         run: npx prisma generate
@@ -102,6 +105,8 @@ jobs:
 
       - name: Create GitHub Release (draft) and upload assets
         uses: softprops/action-gh-release@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           draft: true
           files: |
