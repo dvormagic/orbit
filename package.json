@@ -9,6 +9,8 @@
     "build:ci": "vue-tsc && vite build && npm run prisma:generate && node scripts/generate-template-db.mjs",
     "build": "vue-tsc && vite build && npm run prisma:generate && node scripts/generate-template-db.mjs && electron-builder",
     "build:mac": "vue-tsc && vite build && npm run prisma:generate && node scripts/generate-template-db.mjs && electron-builder --mac --arm64",
+    "build:windows": "npm run build -- --win",
+    "build:linux": "npm run build -- --linux",
     "release": "vue-tsc && vite build && npm run prisma:generate && node scripts/generate-template-db.mjs && electron-builder --publish always",
     "preview": "vite preview"
   },
