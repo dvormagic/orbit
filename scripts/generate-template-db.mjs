@@ -16,6 +16,8 @@ const prismaBin = path.join(
   process.platform === 'win32' ? 'prisma.cmd' : 'prisma',
 )
 
+const isWin = process.platform === 'win32'
+
 const rmIfExists = (p) => {
   try {
     fs.rmSync(p, { force: true })
@@ -30,7 +32,9 @@ rmIfExists(`${dbPath}-journal`)
 rmIfExists(`${dbPath}-wal`)
 rmIfExists(`${dbPath}-shm`)
 
-const res = spawnSync(prismaBin, ['migrate', 'deploy', '--schema', schemaPath], {
+const prismaArgs = ['migrate', 'deploy', '--schema', schemaPath]
+
+const baseSpawnOptions = {
   cwd: projectRoot,
   stdio: 'inherit',
   env: {
@@ -39,7 +43,16 @@ const res = spawnSync(prismaBin, ['migrate', 'deploy', '--schema', schemaPath], 
     // so `file:./dev.db` becomes `prisma/dev.db` in the project root.
     DATABASE_URL: 'file:./dev.db',
   },
-})
+}
+
+// On Windows, spawning a .cmd directly can fail depending on how Node was invoked.
+// We try the direct call first, then fall back to running it via cmd.exe.
+let res = spawnSync(prismaBin, prismaArgs, baseSpawnOptions)
+if (isWin && (res.error || res.status === null)) {
+  const quote = (s) => `"${String(s).replaceAll('"', '\\"')}"`
+  const cmdLine = `${quote(prismaBin)} ${prismaArgs.map(quote).join(' ')}`
+  res = spawnSync('cmd.exe', ['/d', '/s', '/c', cmdLine], baseSpawnOptions)
+}
 
 if (res.status !== 0) {
   process.exit(res.status ?? 1)
