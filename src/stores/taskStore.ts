@@ -12,9 +12,10 @@ export interface Task {
     id: string
     jiraTag: string
     title: string | null
-    status: 'TODO' | 'IN_PROGRESS' | 'PR' | 'DONE'
+    status: 'TODO' | 'IN_PROGRESS' | 'PR' | 'BLOCKED' | 'DONE'
     jiraUrl: string | null
     prUrl: string | null
+    parentId: string | null
     createdAt: Date
     updatedAt: Date
     timeLogs: TimeLog[]
@@ -37,11 +38,12 @@ export const useTaskStore = defineStore('tasks', {
             }
         },
 
-        async createTask(jiraTag: string, title?: string) {
+        async createTask(jiraTag: string, title?: string, parentId?: string | null) {
             const newTask = await window.ipcRenderer.orbit.createTask({
                 jiraTag,
                 title,
-                status: 'TODO'
+                status: 'TODO',
+                parentId: parentId ?? null,
             })
             await this.fetchTasks()
             return newTask
@@ -66,9 +68,9 @@ export const useTaskStore = defineStore('tasks', {
                 taskId: taskId,
                 startTime: Date.now()
             }
-            // Also update task status to IN_PROGRESS if it's currently TODO
+            // Also update task status to IN_PROGRESS if it's currently TODO or BLOCKED
             const task = this.tasks.find(t => t.id === taskId)
-            if (task && task.status === 'TODO') {
+            if (task && (task.status === 'TODO' || task.status === 'BLOCKED')) {
                 await this.updateTask(taskId, { status: 'IN_PROGRESS' })
             }
         },

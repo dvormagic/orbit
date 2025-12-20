@@ -1,13 +1,14 @@
 {
   "name": "orbit",
   "private": true,
-  "version": "0.2.3",
+  "version": "0.2.4",
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vue-tsc && vite build && electron-builder",
-    "build:mac": "vue-tsc && vite build && electron-builder --mac --arm64",
-    "release": "vue-tsc && vite build && electron-builder --publish always",
+    "build:ci": "vue-tsc && vite build && node scripts/generate-template-db.mjs",
+    "build": "vue-tsc && vite build && node scripts/generate-template-db.mjs && electron-builder",
+    "build:mac": "vue-tsc && vite build && node scripts/generate-template-db.mjs && electron-builder --mac --arm64",
+    "release": "vue-tsc && vite build && node scripts/generate-template-db.mjs && electron-builder --publish always",
     "preview": "vite preview"
   },
   "dependencies": {

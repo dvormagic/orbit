@@ -18,14 +18,14 @@ const logPath = path.join(userDataPath, 'debug.log')
 
 // Helper for early logging
 const log = (msg: string) => {
-    try {
-        if (!fs.existsSync(userDataPath)) {
-            fs.mkdirSync(userDataPath, { recursive: true })
-        }
-        fs.appendFileSync(logPath, `[${new Date().toISOString()}] ${msg}\n`)
-    } catch (e) {
-        console.error('Logging failed:', e)
+  try {
+    if (!fs.existsSync(userDataPath)) {
+      fs.mkdirSync(userDataPath, { recursive: true })
     }
+    fs.appendFileSync(logPath, `[${new Date().toISOString()}] ${msg}\n`)
+  } catch (e) {
+    console.error('Logging failed:', e)
+  }
 }
 
 log('--- ORBIT DB INIT ---')
@@ -33,41 +33,56 @@ log(`NODE_ENV: ${process.env.NODE_ENV}`)
 log(`isPackaged: ${app.isPackaged}`)
 log(`userDataPath: ${userDataPath}`)
 
-// Source DB path (from project root in dev, or from app resources in prod)
-const sourceDbPath = (process.env.NODE_ENV === 'development' || !app.isPackaged)
-    ? path.join(__dirname, '..', 'prisma', 'dev.db')
-    : path.join(process.resourcesPath, 'prisma', 'dev.db')
+const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged
 
-log(`Source DB Path: ${sourceDbPath}`)
+// Dev DB path (from project root)
+const devDbPath = path.join(__dirname, '..', 'prisma', 'dev.db')
 
-const dbPath = (process.env.NODE_ENV === 'development' || !app.isPackaged)
-    ? sourceDbPath
-    : productionDbPath
+// Template DB path candidates in packaged apps (extraResources can land in different places)
+const templateDbCandidates = [
+  path.join(process.resourcesPath, 'prisma', 'dev.db'),
+  path.join(process.resourcesPath, 'app.asar.unpacked', 'prisma', 'dev.db'),
+  path.join(app.getAppPath(), 'prisma', 'dev.db'),
+]
+
+const templateDbPath = isDev
+  ? devDbPath
+  : (templateDbCandidates.find(p => fs.existsSync(p)) ?? templateDbCandidates[0])
+
+log(`devDbPath: ${devDbPath}`)
+log(`templateDbPath: ${templateDbPath}`)
+
+const dbPath = isDev ? devDbPath : productionDbPath
 
 log(`Final dbPath used: ${dbPath}`)
 
 // Handle Production DB Copying
 if (app.isPackaged && !fs.existsSync(productionDbPath)) {
-    log('Production DB not found. Attempting to copy from template...')
-    try {
-        if (fs.existsSync(sourceDbPath)) {
-            fs.copyFileSync(sourceDbPath, productionDbPath)
-            log('SUCCESS: Database copied from template.')
-            // Verify permissions
-            fs.chmodSync(productionDbPath, 0o666)
-            log('SUCCESS: Database permissions set.')
-        } else {
-            log(`FATAL ERROR: Template database NOT FOUND at ${sourceDbPath}`)
-        }
-    } catch (err) {
-        log(`FATAL ERROR copying DB: ${err}`)
+  log('Production DB not found. Attempting to initialize from template...')
+  try {
+    if (fs.existsSync(templateDbPath)) {
+      fs.copyFileSync(templateDbPath, productionDbPath)
+      log('SUCCESS: Database copied from template.')
+      try {
+        // Best-effort: on Windows this can be a no-op or throw.
+        fs.chmodSync(productionDbPath, 0o666)
+        log('SUCCESS: Database permissions set.')
+      } catch (err) {
+        log(`WARN: chmod failed (non-fatal): ${err}`)
+      }
+    } else {
+      log(`FATAL: Template database NOT FOUND. Looked at: ${templateDbCandidates.join(' | ')}`)
+      log('FATAL: The app may not function correctly until a template DB is packaged.')
     }
+  } catch (err) {
+    log(`FATAL ERROR copying DB: ${err}`)
+  }
 } else if (app.isPackaged) {
-    log('Production DB already exists.')
+  log('Production DB already exists.')
 }
 
 const prisma = new PrismaClient({
-    datasourceUrl: `file:${dbPath}`,
+  datasourceUrl: `file:${dbPath}`,
 } as any)
 
 export default prisma

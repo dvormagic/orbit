@@ -3,7 +3,7 @@ import OrbitWidget from './components/OrbitWidget.vue'
 </script>
 
 <template>
-  <div class="w-screen p-2 overflow-visible">
+  <div class="w-full h-full overflow-hidden">
     <OrbitWidget />
   </div>
 </template>

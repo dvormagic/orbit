@@ -9,6 +9,8 @@ export default defineConfig({
     path: "prisma/migrations",
   },
   datasource: {
+    // NOTE: SQLite relative paths are resolved from the schema directory (./prisma),
+    // so `file:./dev.db` ends up at `prisma/dev.db` in the project root.
     url: "file:./dev.db",
   },
 });

@@ -19,9 +19,14 @@ model Task {
   status      String    @default("TODO") // TODO, IN_PROGRESS, PR, DONE
   jiraUrl     String?
   prUrl       String?
+  parentId    String?
+  parent      Task?     @relation("TaskHierarchy", fields: [parentId], references: [id])
+  children    Task[]    @relation("TaskHierarchy")
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
   timeLogs    TimeLog[]
+
+  @@index([parentId])
 }
 
 model TimeLog {

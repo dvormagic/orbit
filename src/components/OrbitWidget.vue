@@ -14,10 +14,46 @@ const editingUrlType = ref<'jira' | 'pr' | null>(null)
 const editingUrlValue = ref('')
 const expandedTaskId = ref<string | null>(null)
 const activeTab = ref<'active' | 'completed'>('active')
+const collapsedTaskIds = ref<Record<string, boolean>>({})
+
+const subtaskFormParentId = ref<string | null>(null)
+const newSubtaskTag = ref('')
+const newSubtaskTitle = ref('')
+
+const orbHitboxRef = ref<HTMLElement | null>(null)
+const orbitPassthroughEnabled = ref(false)
 
 // Timer for live elapsed time
 const now = ref(Date.now())
 let timerInterval: ReturnType<typeof setInterval> | null = null
+
+let orbitRafPending = false
+const setMousePassthrough = async (enabled: boolean) => {
+  if (orbitPassthroughEnabled.value === enabled) return
+  orbitPassthroughEnabled.value = enabled
+  await window.ipcRenderer.orbit.setMousePassthrough(enabled)
+}
+
+const onOrbitMouseMove = (e: MouseEvent) => {
+  if (!isOrbitMode.value) return
+  if (orbitRafPending) return
+  orbitRafPending = true
+  requestAnimationFrame(() => {
+    orbitRafPending = false
+    const el = orbHitboxRef.value
+    if (!el) return
+    const rect = el.getBoundingClientRect()
+    const cx = rect.left + rect.width / 2
+    const cy = rect.top + rect.height / 2
+    const dx = e.clientX - cx
+    const dy = e.clientY - cy
+    const radius = Math.min(rect.width, rect.height) / 2
+    const isInside = dx * dx + dy * dy <= radius * radius
+
+    // Outside the orb hitbox should be click-through.
+    void setMousePassthrough(!isInside)
+  })
+}
 
 onMounted(async () => {
   try {
@@ -29,10 +65,13 @@ onMounted(async () => {
   timerInterval = setInterval(() => {
     now.value = Date.now()
   }, 1000)
+
+  window.addEventListener('mousemove', onOrbitMouseMove)
 })
 
 onUnmounted(() => {
   if (timerInterval) clearInterval(timerInterval)
+  window.removeEventListener('mousemove', onOrbitMouseMove)
 })
 
 // Active task being tracked
@@ -41,9 +80,8 @@ const activeTask = computed(() => {
   return taskStore.tasks.find(t => t.id === taskStore.activeLog?.taskId)
 })
 
-// Filtered tasks by tab
-const activeTasks = computed(() => taskStore.tasks.filter(t => t.status !== 'DONE'))
-const completedTasks = computed(() => taskStore.tasks.filter(t => t.status === 'DONE'))
+const activeCount = computed(() => taskStore.tasks.filter(t => t.status !== 'DONE').length)
+const completedCount = computed(() => taskStore.tasks.filter(t => t.status === 'DONE').length)
 
 // Format seconds to HH:MM:SS
 const formatTime = (seconds: number): string => {
@@ -53,8 +91,8 @@ const formatTime = (seconds: number): string => {
   return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`
 }
 
-// Get total time spent on a task (from completed logs)
-const getTotalTime = (task: Task): number => {
+// Own time spent on a task (from completed logs only)
+const getLoggedSeconds = (task: Task): number => {
   return task.timeLogs.reduce((acc, log) => acc + (log.duration || 0), 0)
 }
 
@@ -64,12 +102,105 @@ const getElapsedTime = computed(() => {
   return Math.floor((now.value - taskStore.activeLog.startTime) / 1000)
 })
 
-// Get display time for a task (total + current if active)
+type TaskNode = { task: Task; children: TaskNode[] }
+type FlatTaskNode = { task: Task; depth: number; hasChildren: boolean }
+
+const isCollapsed = (taskId: string) => collapsedTaskIds.value[taskId] === true
+const toggleCollapse = (taskId: string) => {
+  collapsedTaskIds.value = {
+    ...collapsedTaskIds.value,
+    [taskId]: !isCollapsed(taskId),
+  }
+}
+
+const tasksById = computed(() => {
+  const map = new Map<string, Task>()
+  for (const t of taskStore.tasks) map.set(t.id, t)
+  return map
+})
+
+const childrenByParentId = computed(() => {
+  const map = new Map<string | null, Task[]>()
+  for (const t of taskStore.tasks) {
+    const key = t.parentId && tasksById.value.has(t.parentId) ? t.parentId : null
+    const arr = map.get(key) ?? []
+    arr.push(t)
+    map.set(key, arr)
+  }
+  for (const arr of map.values()) {
+    arr.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+  }
+  return map
+})
+
+const fullTree = computed<TaskNode[]>(() => {
+  const byParent = childrenByParentId.value
+  const visit = (parentId: string | null): TaskNode[] => {
+    return (byParent.get(parentId) ?? []).map(task => ({
+      task,
+      children: visit(task.id),
+    }))
+  }
+  return visit(null)
+})
+
+const rollupSecondsById = computed<Record<string, number>>(() => {
+  const totals: Record<string, number> = {}
+
+  const ownSeconds = (task: Task) => {
+    const total = getLoggedSeconds(task)
+    const isActive = taskStore.activeLog?.taskId === task.id
+    const current = isActive ? getElapsedTime.value : 0
+    return total + current
+  }
+
+  const dfs = (node: TaskNode): number => {
+    const childrenSum = node.children.reduce((acc, child) => acc + dfs(child), 0)
+    const total = ownSeconds(node.task) + childrenSum
+    totals[node.task.id] = total
+    return total
+  }
+
+  for (const root of fullTree.value) dfs(root)
+  return totals
+})
+
+// Filter tree based on tab, keeping ancestors that have matching descendants.
+const filteredTree = computed<TaskNode[]>(() => {
+  const predicate = (t: Task) => (activeTab.value === 'active' ? t.status !== 'DONE' : t.status === 'DONE')
+  const filterNode = (node: TaskNode): TaskNode | null => {
+    const filteredChildren = node.children
+      .map(filterNode)
+      .filter((x): x is TaskNode => x !== null)
+    if (predicate(node.task) || filteredChildren.length > 0) {
+      return { task: node.task, children: filteredChildren }
+    }
+    return null
+  }
+  return fullTree.value
+    .map(filterNode)
+    .filter((x): x is TaskNode => x !== null)
+})
+
+const visibleFlatTasks = computed<FlatTaskNode[]>(() => {
+  const out: FlatTaskNode[] = []
+  const walk = (nodes: TaskNode[], depth: number) => {
+    for (const node of nodes) {
+      out.push({ task: node.task, depth, hasChildren: node.children.length > 0 })
+      if (node.children.length > 0 && !isCollapsed(node.task.id)) {
+        walk(node.children, depth + 1)
+      }
+    }
+  }
+  walk(filteredTree.value, 0)
+  return out
+})
+
+// Display time for a task (own + children roll-up, plus current active elapsed if relevant)
 const getDisplayTime = (task: Task): string => {
-  const total = getTotalTime(task)
-  const isActive = taskStore.activeLog?.taskId === task.id
-  const current = isActive ? getElapsedTime.value : 0
-  return formatTime(total + current)
+  const total = rollupSecondsById.value[task.id] ??
+    (getLoggedSeconds(task) + (taskStore.activeLog?.taskId === task.id ? getElapsedTime.value : 0))
+  return formatTime(total)
 }
 
 const addNewTask = async () => {
@@ -78,6 +209,24 @@ const addNewTask = async () => {
   newTaskTag.value = ''
   newTaskTitle.value = ''
   showAddForm.value = false
+}
+
+const startAddSubtask = (parentId: string) => {
+  subtaskFormParentId.value = parentId
+  newSubtaskTag.value = ''
+  newSubtaskTitle.value = ''
+}
+
+const cancelAddSubtask = () => {
+  subtaskFormParentId.value = null
+  newSubtaskTag.value = ''
+  newSubtaskTitle.value = ''
+}
+
+const addNewSubtask = async (parentId: string) => {
+  if (!newSubtaskTag.value) return
+  await taskStore.createTask(newSubtaskTag.value, newSubtaskTitle.value, parentId)
+  cancelAddSubtask()
 }
 
 const toggleTimer = (taskId: string) => {
@@ -95,6 +244,10 @@ const toggleTaskExpand = (taskId: string) => {
 const toggleOrbitMode = () => {
   isOrbitMode.value = !isOrbitMode.value
   window.ipcRenderer.orbit.setOrbitMode(isOrbitMode.value)
+  if (!isOrbitMode.value) {
+    // Ensure the full widget is always interactive.
+    void setMousePassthrough(false)
+  }
 }
 
 const startEditUrl = (taskId: string, type: 'jira' | 'pr', currentValue: string | null) => {
@@ -138,6 +291,7 @@ const getStatusColor = (status: string) => {
   switch (status) {
     case 'IN_PROGRESS': return 'text-amber-400 bg-amber-400/10'
     case 'PR': return 'text-purple-400 bg-purple-400/10'
+    case 'BLOCKED': return 'text-rose-400 bg-rose-400/10'
     case 'DONE': return 'text-emerald-400 bg-emerald-400/10'
     default: return 'text-slate-400 bg-slate-400/10'
   }
@@ -147,25 +301,28 @@ const getStatusColor = (status: string) => {
 <template>
   <!-- Orbit Mode (Floating Orb) -->
   <div v-if="isOrbitMode" class="w-full h-screen flex items-center justify-center">
-    <div class="orb-glow w-20 h-20 rounded-full cursor-grab draggable
-                flex items-center justify-center
-                bg-slate-800 relative border border-slate-700/50">
-      <!-- Clickable center area -->
-      <div @click="toggleOrbitMode" 
-           class="no-draggable cursor-pointer z-10 flex flex-col items-center justify-center">
-        <span v-if="activeTask" class="text-[9px] font-bold text-cyan-400 tracking-wide leading-tight text-center">
-          {{ activeTask.jiraTag }}
-        </span>
-        <span v-else class="text-[10px] font-bold text-slate-500">ORBIT</span>
+    <!-- Hitbox (slightly larger than the orb/glow) for mouse passthrough toggling -->
+    <div ref="orbHitboxRef" class="w-28 h-28 flex items-center justify-center">
+      <div class="orb-glow w-20 h-20 rounded-full cursor-grab draggable
+                  flex items-center justify-center
+                  bg-slate-800 relative border border-slate-700/50">
+        <!-- Clickable center area -->
+        <div @click="toggleOrbitMode" 
+             class="no-draggable cursor-pointer z-10 flex flex-col items-center justify-center">
+          <span v-if="activeTask" class="text-[9px] font-bold text-cyan-400 tracking-wide leading-tight text-center">
+            {{ activeTask.jiraTag }}
+          </span>
+          <span v-else class="text-[10px] font-bold text-slate-500">ORBIT</span>
+        </div>
+        <!-- Active indicator - overlapping the sphere -->
+        <div v-if="activeTask" class="absolute -top-0.5 -right-0.5 w-4 h-4 bg-green-400 rounded-full animate-ping z-20"></div>
+        <div v-if="activeTask" class="absolute -top-0.5 -right-0.5 w-4 h-4 bg-green-400 rounded-full border-2 border-slate-900 z-20"></div>
       </div>
-      <!-- Active indicator - overlapping the sphere -->
-      <div v-if="activeTask" class="absolute -top-0.5 -right-0.5 w-4 h-4 bg-green-400 rounded-full animate-ping z-20"></div>
-      <div v-if="activeTask" class="absolute -top-0.5 -right-0.5 w-4 h-4 bg-green-400 rounded-full border-2 border-slate-900 z-20"></div>
     </div>
   </div>
 
   <!-- Full Widget -->
-  <div v-else class="relative bg-slate-900 border border-slate-700/50 rounded-xl shadow-2xl overflow-hidden flex flex-col">
+  <div v-else class="w-full h-full relative bg-slate-900 border border-slate-700/50 rounded-xl shadow-2xl overflow-hidden flex flex-col">
     <!-- Header/Draggable Area -->
     <div class="draggable h-10 px-3 flex items-center justify-between bg-slate-800 border-b border-slate-700/50">
       <div class="flex items-center gap-2">
@@ -213,7 +370,7 @@ const getStatusColor = (status: string) => {
         class="flex-1 py-2 px-3 text-xs font-medium flex items-center justify-center gap-1.5 transition-colors"
       >
         <ListTodo class="w-3.5 h-3.5" />
-        Activas ({{ activeTasks.length }})
+        Activas ({{ activeCount }})
       </button>
       <button 
         @click="activeTab = 'completed'" 
@@ -221,7 +378,7 @@ const getStatusColor = (status: string) => {
         class="flex-1 py-2 px-3 text-xs font-medium flex items-center justify-center gap-1.5 transition-colors"
       >
         <CheckCircle2 class="w-3.5 h-3.5" />
-        Finalizadas ({{ completedTasks.length }})
+        Finalizadas ({{ completedCount }})
       </button>
     </div>
 
@@ -242,74 +399,109 @@ const getStatusColor = (status: string) => {
 
       <!-- Active Tasks Tab -->
       <div v-if="activeTab === 'active'" class="space-y-2">
-        <div v-if="activeTasks.length === 0" class="text-center py-8 text-slate-500 text-xs">
+        <div v-if="visibleFlatTasks.length === 0" class="text-center py-8 text-slate-500 text-xs">
           No hay tareas activas
         </div>
-        <div v-for="task in activeTasks" :key="task.id" 
+        <div v-for="node in visibleFlatTasks" :key="node.task.id" 
              class="bg-slate-800/50 border border-slate-700/50 rounded-lg hover:border-cyan-500/30 transition-all overflow-hidden">
           <!-- Minimal View (Always Visible) -->
-          <div class="p-3 flex items-start justify-between gap-2 cursor-pointer" @click="toggleTaskExpand(task.id)">
+          <div class="p-3 flex items-start justify-between gap-2 cursor-pointer"
+               :style="{ paddingLeft: `${12 + node.depth * 12}px` }"
+               @click="toggleTaskExpand(node.task.id)">
             <div class="flex-1 min-w-0">
               <div class="flex items-center gap-2">
-                <span :class="getStatusColor(task.status)" class="text-[10px] font-bold px-1.5 py-0.5 rounded shrink-0">
-                  {{ task.status }}
+                <button v-if="node.hasChildren"
+                        @click.stop="toggleCollapse(node.task.id)"
+                        class="no-draggable p-1 hover:bg-slate-700/50 rounded transition-colors -ml-1"
+                        :title="isCollapsed(node.task.id) ? 'Expandir subtareas' : 'Colapsar subtareas'">
+                  <ChevronDown class="w-3.5 h-3.5 text-slate-400 transition-transform"
+                               :class="isCollapsed(node.task.id) ? '-rotate-90' : 'rotate-0'" />
+                </button>
+                <span :class="getStatusColor(node.task.status)" class="text-[10px] font-bold px-1.5 py-0.5 rounded shrink-0">
+                  {{ node.task.status }}
                 </span>
-                <span class="text-sm font-bold truncate">{{ task.jiraTag }}</span>
+                <span class="text-sm font-bold truncate">{{ node.task.jiraTag }}</span>
               </div>
-              <p v-if="task.title" class="text-xs text-slate-400 mt-1 line-clamp-2">{{ task.title }}</p>
+              <p v-if="node.task.title" class="text-xs text-slate-400 mt-1 line-clamp-2">{{ node.task.title }}</p>
             </div>
             <!-- Timer Button -->
-            <button @click.stop="toggleTimer(task.id)"
-                    :class="taskStore.activeLog?.taskId === task.id ? 'bg-orange-500/20 text-orange-400' : 'bg-cyan-500/20 text-cyan-400'"
+            <button @click.stop="toggleTimer(node.task.id)"
+                    :class="taskStore.activeLog?.taskId === node.task.id ? 'bg-orange-500/20 text-orange-400' : 'bg-cyan-500/20 text-cyan-400'"
                     class="p-2 rounded-lg hover:opacity-80 transition-all active:scale-90 shrink-0">
-              <Pause v-if="taskStore.activeLog?.taskId === task.id" class="w-4 h-4 fill-current" />
+              <Pause v-if="taskStore.activeLog?.taskId === node.task.id" class="w-4 h-4 fill-current" />
               <Play v-else class="w-4 h-4 fill-current" />
             </button>
           </div>
 
           <!-- Expanded Details -->
-          <div v-if="expandedTaskId === task.id" class="px-3 pb-3 pt-2 border-t border-slate-700/30 space-y-2 animate-in slide-in-from-top-1 duration-150">
+          <div v-if="expandedTaskId === node.task.id"
+               class="px-3 pb-3 pt-2 border-t border-slate-700/30 space-y-2 animate-in slide-in-from-top-1 duration-150"
+               :style="{ paddingLeft: `${12 + node.depth * 12}px` }">
             
             <!-- Time Display -->
             <div class="flex items-center gap-2 text-xs text-slate-500">
-              <span>Tiempo total:</span>
-              <span class="font-mono text-cyan-400">{{ getDisplayTime(task) }}</span>
+              <span>Tiempo total (incl. subtareas):</span>
+              <span class="font-mono text-cyan-400">{{ getDisplayTime(node.task) }}</span>
             </div>
 
             <!-- Quick Actions Bar -->
             <div class="flex items-center justify-between gap-2">
               <!-- Link Buttons -->
               <div class="flex items-center gap-1">
-                <button @click.stop="task.jiraUrl ? openUrl(task.jiraUrl) : startEditUrl(task.id, 'jira', task.jiraUrl)" 
-                        :class="task.jiraUrl ? 'text-blue-400 bg-blue-400/10' : 'text-slate-500 bg-slate-700/50'"
+                <button @click.stop="node.task.jiraUrl ? openUrl(node.task.jiraUrl) : startEditUrl(node.task.id, 'jira', node.task.jiraUrl)" 
+                        :class="node.task.jiraUrl ? 'text-blue-400 bg-blue-400/10' : 'text-slate-500 bg-slate-700/50'"
                         class="p-1.5 rounded text-[10px] font-bold flex items-center gap-1 hover:opacity-80 transition-all"
-                        :title="task.jiraUrl ? 'Abrir Tarea' : 'Añadir URL Tarea'">
+                        :title="node.task.jiraUrl ? 'Abrir Tarea' : 'Añadir URL Tarea'">
                   <Link2 class="w-3 h-3" />
                   <span>TASK</span>
                 </button>
-                <button @click.stop="task.prUrl ? openUrl(task.prUrl) : startEditUrl(task.id, 'pr', task.prUrl)" 
-                        :class="task.prUrl ? 'text-purple-400 bg-purple-400/10' : 'text-slate-500 bg-slate-700/50'"
+                <button @click.stop="node.task.prUrl ? openUrl(node.task.prUrl) : startEditUrl(node.task.id, 'pr', node.task.prUrl)" 
+                        :class="node.task.prUrl ? 'text-purple-400 bg-purple-400/10' : 'text-slate-500 bg-slate-700/50'"
                         class="p-1.5 rounded text-[10px] font-bold flex items-center gap-1 hover:opacity-80 transition-all"
-                        :title="task.prUrl ? 'Abrir PR' : 'Añadir URL PR'">
+                        :title="node.task.prUrl ? 'Abrir PR' : 'Añadir URL PR'">
                   <GitPullRequest class="w-3 h-3" />
                   <span>PR</span>
+                </button>
+                <button @click.stop="subtaskFormParentId === node.task.id ? cancelAddSubtask() : startAddSubtask(node.task.id)"
+                        :class="subtaskFormParentId === node.task.id ? 'text-cyan-400 bg-cyan-400/10' : 'text-slate-500 bg-slate-700/50'"
+                        class="p-1.5 rounded text-[10px] font-bold flex items-center gap-1 hover:opacity-80 transition-all"
+                        title="Añadir Subtarea">
+                  <Plus class="w-3 h-3" />
+                  <span>SUB</span>
                 </button>
               </div>
 
               <!-- Status + Delete -->
               <div class="flex items-center gap-2">
-                <select :value="task.status" @change="e => taskStore.updateTask(task.id, { status: (e.target as HTMLSelectElement).value as any })"
+                <select :value="node.task.status" @change="e => taskStore.updateTask(node.task.id, { status: (e.target as HTMLSelectElement).value as any })"
                         @click.stop
                         class="bg-slate-700 text-[10px] border border-slate-600 rounded px-1.5 py-1 focus:outline-none text-slate-300">
                   <option value="TODO">TODO</option>
                   <option value="IN_PROGRESS">IN PROGRESS</option>
                   <option value="PR">PR</option>
+                  <option value="BLOCKED">BLOCKED</option>
                   <option value="DONE">DONE</option>
                 </select>
-                <button @click.stop="taskStore.deleteTask(task.id)" class="text-slate-600 hover:text-red-400 transition-colors p-1">
+                <button @click.stop="taskStore.deleteTask(node.task.id)" class="text-slate-600 hover:text-red-400 transition-colors p-1">
                   <Trash2 class="w-3.5 h-3.5" />
                 </button>
               </div>
+            </div>
+
+            <!-- Add Subtask Form (inline) -->
+            <div v-if="subtaskFormParentId === node.task.id" class="space-y-2 pt-2 border-t border-slate-700/30">
+              <div class="flex gap-2">
+                <input v-model="newSubtaskTag" placeholder="Subtask tag (NTD-1223-1)" 
+                       class="flex-1 bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-xs focus:border-cyan-500 focus:outline-none transition-colors" />
+                <button @click.stop="addNewSubtask(node.task.id)" class="bg-cyan-500 text-slate-900 px-3 py-2 rounded-lg hover:bg-cyan-400 transition-colors">
+                  <Plus class="w-4 h-4" />
+                </button>
+              </div>
+              <input v-model="newSubtaskTitle" placeholder="Descripción (opcional)" 
+                     class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-xs focus:border-cyan-500 focus:outline-none transition-colors" />
+              <button @click.stop="cancelAddSubtask" class="w-full bg-slate-700 text-slate-200 py-2 rounded-lg text-xs font-bold hover:bg-slate-600 transition-colors">
+                Cancelar
+              </button>
             </div>
           </div>
         </div>
@@ -317,26 +509,34 @@ const getStatusColor = (status: string) => {
 
       <!-- Completed Tasks Tab -->
       <div v-if="activeTab === 'completed'" class="space-y-2">
-        <div v-if="completedTasks.length === 0" class="text-center py-8 text-slate-500 text-xs">
+        <div v-if="visibleFlatTasks.length === 0" class="text-center py-8 text-slate-500 text-xs">
           No hay tareas finalizadas
         </div>
-        <div v-for="task in completedTasks" :key="task.id" 
+        <div v-for="node in visibleFlatTasks" :key="node.task.id" 
              class="bg-slate-800/30 border border-slate-700/30 rounded-lg transition-all overflow-hidden opacity-70 hover:opacity-100">
           <!-- Minimal View -->
-          <div class="p-3 flex items-center justify-between gap-2">
+          <div class="p-3 flex items-center justify-between gap-2"
+               :style="{ paddingLeft: `${12 + node.depth * 12}px` }">
             <div class="flex-1 min-w-0 flex items-center gap-2">
+              <button v-if="node.hasChildren"
+                      @click.stop="toggleCollapse(node.task.id)"
+                      class="no-draggable p-1 hover:bg-slate-700/50 rounded transition-colors -ml-1"
+                      :title="isCollapsed(node.task.id) ? 'Expandir subtareas' : 'Colapsar subtareas'">
+                <ChevronDown class="w-3.5 h-3.5 text-slate-400 transition-transform"
+                             :class="isCollapsed(node.task.id) ? '-rotate-90' : 'rotate-0'" />
+              </button>
               <CheckCircle2 class="w-4 h-4 text-emerald-500 shrink-0" />
-              <span class="text-sm font-bold truncate text-slate-400">{{ task.jiraTag }}</span>
-              <span v-if="task.title" class="text-xs text-slate-500 truncate">{{ task.title }}</span>
+              <span class="text-sm font-bold truncate text-slate-400">{{ node.task.jiraTag }}</span>
+              <span v-if="node.task.title" class="text-xs text-slate-500 truncate">{{ node.task.title }}</span>
             </div>
             <div class="flex items-center gap-2">
-              <span class="text-xs font-mono text-slate-500">{{ getDisplayTime(task) }}</span>
-              <button @click="restoreTask(task.id)" 
+              <span class="text-xs font-mono text-slate-500">{{ getDisplayTime(node.task) }}</span>
+              <button @click="restoreTask(node.task.id)" 
                       class="text-xs px-2 py-1 bg-slate-700 text-slate-300 rounded hover:bg-slate-600 transition-colors"
                       title="Restaurar tarea">
                 Restaurar
               </button>
-              <button @click="taskStore.deleteTask(task.id)" class="text-slate-600 hover:text-red-400 transition-colors p-1">
+              <button @click="taskStore.deleteTask(node.task.id)" class="text-slate-600 hover:text-red-400 transition-colors p-1">
                 <Trash2 class="w-3.5 h-3.5" />
               </button>
             </div>

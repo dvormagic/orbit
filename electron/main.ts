@@ -1,6 +1,6 @@
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { app, BrowserWindow, ipcMain, shell } from 'electron'
+import { app, BrowserWindow, ipcMain, screen, shell } from 'electron'
 
 ipcMain.handle('open-external', async (_, url) => {
   return await shell.openExternal(url)
@@ -120,13 +120,41 @@ ipcMain.handle('stop-timer', async (_, { logId, duration }) => {
 })
 
 ipcMain.handle('delete-task', async (_, id) => {
-  // First delete associated logs
-  await prisma.timeLog.deleteMany({ where: { taskId: id } })
-  return await prisma.task.delete({ where: { id } })
+  const collectDescendantIds = async (rootId: string): Promise<string[]> => {
+    const out: string[] = []
+    let frontier: string[] = [rootId]
+    while (frontier.length > 0) {
+      const children = await prisma.task.findMany({
+        where: { parentId: { in: frontier } },
+        select: { id: true },
+      }) as Array<{ id: string }>
+      const childIds = children.map(c => c.id)
+      if (childIds.length === 0) break
+      out.push(...childIds)
+      frontier = childIds
+    }
+    return out
+  }
+
+  const descendantIds = await collectDescendantIds(id)
+  const idsToDelete = [id, ...descendantIds]
+
+  // Delete logs first, then tasks (covers parents + all descendants)
+  await prisma.timeLog.deleteMany({ where: { taskId: { in: idsToDelete } } })
+  await prisma.task.deleteMany({ where: { id: { in: idsToDelete } } })
 })
 
 ipcMain.handle('minimize-window', () => {
   win?.minimize()
+})
+
+ipcMain.handle('set-mouse-passthrough', (_, enabled: boolean) => {
+  if (!win) return
+  if (enabled) {
+    win.setIgnoreMouseEvents(true, { forward: true })
+  } else {
+    win.setIgnoreMouseEvents(false)
+  }
 })
 
 // Resize window for orbit mode vs full mode
@@ -137,13 +165,51 @@ ipcMain.handle('set-orbit-mode', (_, isOrbitMode: boolean) => {
     win.setResizable(false)
     win.setSize(180, 180)
     win.setMinimumSize(180, 180)
+
+    // Default to click-through outside the orb; renderer can toggle via IPC when hovering hitbox.
+    win.setIgnoreMouseEvents(true, { forward: true })
+
+    // Best-effort: if the cursor is already over the orb area, make it interactive immediately.
+    try {
+      const bounds = win.getBounds()
+      const cursor = screen.getCursorScreenPoint()
+      const cx = bounds.x + bounds.width / 2
+      const cy = bounds.y + bounds.height / 2
+      const dx = cursor.x - cx
+      const dy = cursor.y - cy
+      const hitRadius = 60
+      if (dx * dx + dy * dy <= hitRadius * hitRadius) {
+        win.setIgnoreMouseEvents(false)
+      }
+    } catch {
+      // ignore
+    }
   } else {
     // Restore to normal size
+    win.setIgnoreMouseEvents(false)
     win.setMinimumSize(280, 120)
     win.setSize(350, 600)
     win.setResizable(true)
   }
 })
 
-app.whenReady().then(createWindow)
+async function ensureDbSchema() {
+  // Lightweight forward-compat: if the user already has a DB from an older version,
+  // make sure the columns we now rely on exist.
+  try {
+    const columns = await (prisma as any).$queryRawUnsafe(`PRAGMA table_info("Task")`) as Array<{ name?: string }>
+    const hasParentId = Array.isArray(columns) && columns.some(c => c?.name === 'parentId')
+    if (!hasParentId) {
+      await (prisma as any).$executeRawUnsafe(`ALTER TABLE "Task" ADD COLUMN "parentId" TEXT`)
+      await (prisma as any).$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "Task_parentId_idx" ON "Task"("parentId")`)
+    }
+  } catch (err) {
+    console.error('DB schema check failed:', err)
+  }
+}
+
+app.whenReady().then(async () => {
+  await ensureDbSchema()
+  createWindow()
+})
 

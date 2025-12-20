@@ -30,6 +30,7 @@ contextBridge.exposeInMainWorld('ipcRenderer', {
     minimizeWindow: () => ipcRenderer.invoke('minimize-window'),
     openExternal: (url: string) => ipcRenderer.invoke('open-external', url),
     setOrbitMode: (isOrbitMode: boolean) => ipcRenderer.invoke('set-orbit-mode', isOrbitMode),
+    setMousePassthrough: (enabled: boolean) => ipcRenderer.invoke('set-mouse-passthrough', enabled),
   }
 })
 

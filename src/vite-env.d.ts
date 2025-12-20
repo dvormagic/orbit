@@ -12,6 +12,7 @@ interface Window {
             minimizeWindow: () => Promise<void>
             openExternal: (url: string) => Promise<void>
             setOrbitMode: (isOrbitMode: boolean) => Promise<void>
+            setMousePassthrough: (enabled: boolean) => Promise<void>
         }
     }
 }

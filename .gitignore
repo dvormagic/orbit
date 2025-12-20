@@ -8,3 +8,8 @@ release
 .idea
 .vscode
 *.log
+dev.db
+prisma/dev.db
+*.db-journal
+*.db-wal
+*.db-shm
