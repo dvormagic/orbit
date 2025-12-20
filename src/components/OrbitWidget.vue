@@ -196,6 +196,21 @@ const visibleFlatTasks = computed<FlatTaskNode[]>(() => {
   return out
 })
 
+// Visual differentiation by nesting level (0..4). Deeper levels clamp to the last style.
+const DEPTH_STYLES = [
+  { bg: 'bg-slate-800/50', border: 'border-slate-700/50', accent: 'border-l-cyan-500/40', hover: 'hover:border-cyan-500/40' },
+  { bg: 'bg-sky-950/25', border: 'border-sky-900/30', accent: 'border-l-sky-500/40', hover: 'hover:border-sky-500/40' },
+  { bg: 'bg-indigo-950/25', border: 'border-indigo-900/30', accent: 'border-l-indigo-500/40', hover: 'hover:border-indigo-500/40' },
+  { bg: 'bg-violet-950/25', border: 'border-violet-900/30', accent: 'border-l-violet-500/40', hover: 'hover:border-violet-500/40' },
+  { bg: 'bg-emerald-950/20', border: 'border-emerald-900/30', accent: 'border-l-emerald-500/40', hover: 'hover:border-emerald-500/40' },
+] as const
+
+const getDepthCardClasses = (depth: number) => {
+  const idx = Math.min(Math.max(depth, 0), DEPTH_STYLES.length - 1)
+  const s = DEPTH_STYLES[idx]
+  return `border border-l-4 ${s.bg} ${s.border} ${s.accent} ${s.hover}`
+}
+
 // Display time for a task (own + children roll-up, plus current active elapsed if relevant)
 const getDisplayTime = (task: Task): string => {
   const total = rollupSecondsById.value[task.id] ??
@@ -402,8 +417,9 @@ const getStatusColor = (status: string) => {
         <div v-if="visibleFlatTasks.length === 0" class="text-center py-8 text-slate-500 text-xs">
           No hay tareas activas
         </div>
-        <div v-for="node in visibleFlatTasks" :key="node.task.id" 
-             class="bg-slate-800/50 border border-slate-700/50 rounded-lg hover:border-cyan-500/30 transition-all overflow-hidden">
+        <div v-for="node in visibleFlatTasks" :key="node.task.id"
+             class="rounded-lg transition-all overflow-hidden"
+             :class="getDepthCardClasses(node.depth)">
           <!-- Minimal View (Always Visible) -->
           <div class="p-3 flex items-start justify-between gap-2 cursor-pointer"
                :style="{ paddingLeft: `${12 + node.depth * 12}px` }"
@@ -512,8 +528,9 @@ const getStatusColor = (status: string) => {
         <div v-if="visibleFlatTasks.length === 0" class="text-center py-8 text-slate-500 text-xs">
           No hay tareas finalizadas
         </div>
-        <div v-for="node in visibleFlatTasks" :key="node.task.id" 
-             class="bg-slate-800/30 border border-slate-700/30 rounded-lg transition-all overflow-hidden opacity-70 hover:opacity-100">
+        <div v-for="node in visibleFlatTasks" :key="node.task.id"
+             class="rounded-lg transition-all overflow-hidden opacity-70 hover:opacity-100"
+             :class="getDepthCardClasses(node.depth)">
           <!-- Minimal View -->
           <div class="p-3 flex items-center justify-between gap-2"
                :style="{ paddingLeft: `${12 + node.depth * 12}px` }">
