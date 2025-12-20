@@ -1,14 +1,15 @@
 {
   "name": "orbit",
   "private": true,
-  "version": "0.2.10",
+  "version": "0.2.11",
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build:ci": "vue-tsc && vite build && node scripts/generate-template-db.mjs",
-    "build": "vue-tsc && vite build && node scripts/generate-template-db.mjs && electron-builder",
-    "build:mac": "vue-tsc && vite build && node scripts/generate-template-db.mjs && electron-builder --mac --arm64",
-    "release": "vue-tsc && vite build && node scripts/generate-template-db.mjs && electron-builder --publish always",
+    "prisma:generate": "node node_modules/prisma/build/index.js generate --schema prisma/schema.prisma",
+    "build:ci": "vue-tsc && vite build && npm run prisma:generate && node scripts/generate-template-db.mjs",
+    "build": "vue-tsc && vite build && npm run prisma:generate && node scripts/generate-template-db.mjs && electron-builder",
+    "build:mac": "vue-tsc && vite build && npm run prisma:generate && node scripts/generate-template-db.mjs && electron-builder --mac --arm64",
+    "release": "vue-tsc && vite build && npm run prisma:generate && node scripts/generate-template-db.mjs && electron-builder --publish always",
     "preview": "vite preview"
   },
   "dependencies": {
