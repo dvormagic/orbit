@@ -9,14 +9,13 @@ const __dirname = path.dirname(__filename)
 const projectRoot = path.resolve(__dirname, '..')
 const dbPath = path.join(projectRoot, 'prisma', 'dev.db')
 const schemaPath = path.join(projectRoot, 'prisma', 'schema.prisma')
+const prismaCliJs = path.join(projectRoot, 'node_modules', 'prisma', 'build', 'index.js')
 const prismaBin = path.join(
   projectRoot,
   'node_modules',
   '.bin',
   process.platform === 'win32' ? 'prisma.cmd' : 'prisma',
 )
-
-const isWin = process.platform === 'win32'
 
 const rmIfExists = (p) => {
   try {
@@ -45,12 +44,12 @@ const baseSpawnOptions = {
   },
 }
 
-// On Windows, `prisma.cmd` must be executed through a shell (cmd.exe).
-// `shell: true` makes Node do the right thing across environments (local + CI).
-const res = spawnSync(prismaBin, prismaArgs, {
-  ...baseSpawnOptions,
-  shell: isWin,
-})
+// Prefer running Prisma CLI via Node to avoid `.cmd` quoting issues on Windows
+// (paths with spaces/accents like "C:\\Users\\David Ocaña\\..." break easily).
+const useNodePrismaCli = fs.existsSync(prismaCliJs)
+const res = useNodePrismaCli
+  ? spawnSync(process.execPath, [prismaCliJs, ...prismaArgs], baseSpawnOptions)
+  : spawnSync(prismaBin, prismaArgs, baseSpawnOptions)
 
 if (res.status !== 0) {
   process.exit(res.status ?? 1)
