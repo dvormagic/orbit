@@ -45,14 +45,12 @@ const baseSpawnOptions = {
   },
 }
 
-// On Windows, spawning a .cmd directly can fail depending on how Node was invoked.
-// We try the direct call first, then fall back to running it via cmd.exe.
-let res = spawnSync(prismaBin, prismaArgs, baseSpawnOptions)
-if (isWin && (res.error || res.status === null)) {
-  const quote = (s) => `"${String(s).replaceAll('"', '\\"')}"`
-  const cmdLine = `${quote(prismaBin)} ${prismaArgs.map(quote).join(' ')}`
-  res = spawnSync('cmd.exe', ['/d', '/s', '/c', cmdLine], baseSpawnOptions)
-}
+// On Windows, `prisma.cmd` must be executed through a shell (cmd.exe).
+// `shell: true` makes Node do the right thing across environments (local + CI).
+const res = spawnSync(prismaBin, prismaArgs, {
+  ...baseSpawnOptions,
+  shell: isWin,
+})
 
 if (res.status !== 0) {
   process.exit(res.status ?? 1)
